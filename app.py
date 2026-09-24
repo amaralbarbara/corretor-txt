@@ -6,7 +6,7 @@ from google import genai
 from google.genai import types
 
 # 🎨 CONFIGURAÇÃO DA INTERFACE WEB (Estilo IOB Premium)
-st.set_page_config(page_title="Desmembrador Lote TXT - IOB", page_icon="💜", layout="centered")
+st.set_page_config(page_title="Desmembrador Lote TXT - IOB", page_icon="", layout="centered")
 
 # Injeção de CSS Customizado para transformar os elementos visuais nos tons de roxo da IOB
 st.markdown("""
