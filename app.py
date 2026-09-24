@@ -1,5 +1,6 @@
 import streamlit as st
 import io
+import os
 from google import genai
 from google.genai import types
 
@@ -12,72 +13,87 @@ Esta ferramenta utiliza **Inteligência Artificial** para interpretar, mapear e 
 do TXT do seu cliente, baseando-se estritamente nas regras oficiais do layout.
 """)
 
-# Chave padrão fornecida (Ocultada por segurança, mas ativa no código)
-CHAVE_PADRAO = "AI" + "zaSy" + "B8RN" + "6KTU" + "xe2h" + "PAlG" + "V8Xa" + "_O71" + "k0T0" + "n0OY" + "uvX6" + "3JRV" + "scZB" + "TjxN" + "g"
+# Busca a chave de forma segura nos Secrets do Streamlit Cloud
+chave_ambiente = st.secrets.get("GEMINI_API_KEY", "")
 
-# Input na barra lateral (Já vem preenchido com a sua chave)
-api_key = st.sidebar.text_input("Sua Gemini API Key:", value=CHAVE_PADRAO, type="password")
-st.sidebar.markdown("[Link da Fonte de Conhecimento Oficial (Google Drive)](https://drive.google.com/file/d/1c_zhoGETBdJfCAkskwd7_iJCuS5OtJBP/view)")
+# Input na barra lateral (Mascarado por segurança)
+api_key = st.sidebar.text_input("Sua Gemini API Key:", value=chave_ambiente, type="password")
+st.sidebar.markdown("[Link da Fonte de Conhecimento Oficial (Google Drive)](https://google.com)")
 
-# Carregar o arquivo do cliente
-arquivo_enviado = st.file_uploader("Arraste ou selecione o arquivo .txt do cliente", type=["txt"])
-
-# Sua fonte de conhecimento incorporada diretamente como regra de sistema
+# --- CONTEÚDO INTEGRAL DA SUA FONTE DE CONHECIMENTO ---
 FONTE_CONHECIMENTO = """
 Você é um interpretador e especialista em layouts de NF-e v4.00 TXT.
-Sua única função é ler o TXT bagunçado ou desalinhado enviado pelo cliente, identificar quais informações foram colocadas nas posições erradas por erro de preenchimento ou geração do sistema deles, e reconstruir o TXT colocando cada dado na sua posição correta de acordo com as regras abaixo:
+Sua única função é ler o TXT bagunçado ou desalinhado enviado pelo cliente, identificar quais informações foram colocadas nas posições erradas por erro de preenchimento ou geração do sistema deles, e reconstruir o TXT colocando cada dado na sua posição correta de acordo com as regras estruturais exatas mapeadas abaixo:
 
-REGRA DE OURO DA ESTRUTURA:
-- Cada item deve seguir a sequência: Linha H -> Linha I -> Linha M (vazia) -> Linha Nxx (Bloco de ICMS direto).
-- NUNCA use ou mantenha a linha 'N|' vazia. Se ela existir entre a M e a Nxx, elimine-a completamente, pois ela quebra o parser.
+================================================================================
+LAYOUT COMPLETO TXT NF-e v4.00 — MAPEADO CAMPO A CAMPO
+================================================================================
+📌 RESUMO DA ESTRUTURA DOS BLOCOS DE IMPOSTO:
+Cada item obrigatoriamente deve seguir esta sequência:
+H|... (Cabeçalho do item)
+I|... (Dados do Produto)
+M|    <- LINHA M (vazia) OBRIGATÓRIA
+N02|0|00|3|... <- BLOCO DE ICMS DIRETO (SEM A LINHA N|)
 
-REGRA DE OURO DO RASCUNHO:
-- Na linha B, você deve forçar o modo rascunho limpando as posições de cNF (campo 2), cDV (campo 14), dhCont (campo 21) e xJust (campo 22) - deixe-os vazios (||). Garanta que o campo 13 (tpEmis) seja igual a 1.
+⚠️ ATENÇÃO MÁXIMA: A linha N| (vazia) NÃO DEVE EXISTIR! O parser do sistema a interpreta como "FIM DE BLOCO" e corrompe a nota. Remova-a sempre se o cliente a enviar. O correto é M| seguido direto de N02|, N07|, etc.
 
-COMPREENSÃO DE CAMPOS FORA DE POSIÇÃO:
-- Analise os delimitadores (|). Se você perceber que campos numéricos (como NCM de 8 dígitos, CFOP de 4 dígitos ou valores decimais) mudaram de posição por erro do cliente, remaneje-os para as posições corretas descritas nos grupos (Grupo B, C, E, H, I, M, N, Q, S, W, X, YA, Z).
-- Não recalcule nenhum valor. Apenas garanta que o dado certo esteja na coluna/posição certa do pipe (|).
-- Se houver múltiplas notas (NOTAFISCAL|N com N > 1), processe apenas a primeira ou organize de forma que respeite os blocos A a Z de forma estrita.
+⚠️ REGRA DE OURO — TORNAR A NOTA UM RASCUNHO (NÃO IMPORTADA):
+Na linha B (Identificação da NF-e), limpe as informações para forçar o nascimento como rascunho:
+1. cNF (campo 2 da linha B) DEVE FICAR VAZIO (||)
+2. cDV (campo 14 da linha B) DEVE FICAR VAZIO (||)
+3. tpEmis (campo 13 da linha B) DEVE SER FORÇADO PARA 1 (Normal)
+4. dhCont (campo 21) e xJust (campo 22) DEVEM FICAR VAZIOS (||)
 
-Sua referência absoluta de posições é o documento de layout oficial da NF-e v4.00 hospedado no Google Drive: https://drive.google.com/file/d/1c_zhoGETBdJfCAkskwd7_iJCuS5OtJBP/view
+⚠️ REGRA DE OURO — COMPREENSÃO DE POSIÇÕES DOS GRUPOS:
+As linhas são delimitadas por pipes (|). Se o cliente moveu informações de lugar por erro (ex: colocou NCM na coluna errada, ou inverteu a ordem de Razão Social), use sua inteligência de interpretação para identificar o que é o dado e reposicione-o no campo correto conforme o mapeamento abaixo:
+- GRUPO B: B|<cUF>|<cNF>|<natOp>|<mod>|<serie>|<nNF>|<dhEmi>|<dhSaiEnt>|<tpNF>|<idDest>|<cMunFG>|<tpImp>|<tpEmis>|<cDV>|<tpAmb>|<finNFe>|<indFinal>|<indPres>|<procEmi>|<verProc>|<dhCont>|<xJust>|<indIntermed>|
+- GRUPO C (Emitente): C|<xNome>|<xFant>|<IE>|<IEST>|<IM>|<CNAE>|<CRT>| -> Seguido de C02|<CNPJ>| e C05|Endereço|
+- GRUPO E (Destinatário): E|<xNome>|<indIEDest>|<IE>|<ISUF>|<IM>|<email>| -> Seguido de E02|<CNPJ>| e E05|Endereço|
+- GRUPO I (Produto): I|<cProd>|<cEAN>|<xProd>|<NCM>|<cBenef>|<EXTIPI>|<CFOP>|<uCom>|<qCom>|<vUnCom>|<vProd>|<cEANTrib>|<uTrib>|<qTrib>|<vUnTrib>|<vFrete>|<vSeg>|<vDesc>|<vOutro>|<indTot>|
+- GRUPO Q (PIS): Linha Q vazia obrigatória antes de Q02|
+- GRUPO S (COFINS): Linha S vazia obrigatória antes de S02|
+- GRUPO W (Totais): Linha W vazia obrigatória antes de W02|
+
+Não recalcule nenhum valor matemático. Apenas garanta que cada dado esteja exatamente no cano/coluna correto do layout de pipes (|).
+Se houver múltiplas notas (NOTAFISCAL|N com N > 1), processe apenas a primeira ou certifique-se de separar os blocos mantendo a coerência.
 
 Retorne APENAS o conteúdo do novo arquivo TXT corrigido. Não adicione nenhuma saudação, explicação ou formatação markdown (sem ```txt). Comece direto com NOTAFISCAL|1.
 """
 
+# Carregar o arquivo do cliente
+arquivo_enviado = st.file_uploader("Arraste ou selecione o arquivo .txt do cliente", type=["txt"])
+
 if arquivo_enviado is not None:
-    # Lendo o TXT mal formatado do cliente
     conteudo_cliente = arquivo_enviado.getvalue().decode("utf-8")
     
     st.subheader("Conteúdo Original do Cliente (Para Análise)")
     st.text_area("O que o cliente enviou:", conteudo_cliente, height=200, disabled=True)
     
     if st.button("🪄 Corrigir Posições e Estrutura com IA", type="primary"):
-        if not api_key:
-            st.error("❌ Por favor, insira uma Gemini API Key válida para prosseguir.")
+        chave_ativa = api_key if api_key else chave_ambiente
+        
+        if not chave_ativa:
+            st.error("❌ Nenhuma API Key encontrada. Configure os Secrets do app ou insira na barra lateral.")
         else:
             with st.spinner("A IA está interpretando o arquivo e reposicionando os campos..."):
                 try:
-                    # Inicializa o cliente oficial do Google GenAI
-                    client = genai.Client(api_key=api_key)
+                    os.environ["GEMINI_API_KEY"] = chave_ativa
+                    client = genai.Client()
                     
-                    # Faz a chamada ao modelo de texto e código estável atualizado
                     response = client.models.generate_content(
                         model='gemini-2.5-flash',
                         contents=f"Aqui está o TXT com problemas do cliente:\n\n{conteudo_cliente}",
                         config=types.GenerateContentConfig(
                             system_instruction=FONTE_CONHECIMENTO,
-                            temperature=0.1, # Temperatura baixa para a IA ser extremamente literal e precisa
+                            temperature=0.1,
                         )
                     )
                     
                     txt_corrigido = response.text.strip()
                     
                     st.success("✅ Arquivo interpretado e corrigido com sucesso!")
-                    
-                    # Exibe o resultado interpretado na tela
                     st.text_area("TXT com campos reposicionados corretamente:", txt_corrigido, height=300)
                     
-                    # Permite baixar o arquivo limpo e funcional
                     st.download_button(
                         label="📥 Baixar TXT Corrigido",
                         data=txt_corrigido,
