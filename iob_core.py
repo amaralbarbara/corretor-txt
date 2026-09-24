@@ -143,7 +143,7 @@ def corrigir_nota(linhas_in):
 
         if tag == "N04" and len(p) > 2 and p[2] == "20":
             p = pad(p, 8)
-            orig, modbc, pred, vbc, picms = p[1], p[3], p[4], p[5], p[6]
+            orig, modbc, vbc, pred, picms = p[1], p[3], p[4], p[5], p[6]  # ordem IOB
             if not vbc.strip() and vprod_item:
                 vbc = fmt(vprod_item * (1 - D(pred) / 100))
             vicms = p[7] if p[7].strip() else fmt(D(vbc) * D(picms) / 100)
@@ -258,12 +258,31 @@ def corrigir_nota(linhas_in):
     return out, log
 
 
+def limitar_campos(linhas):
+    """Garante I18/I25 sem pipes além do limite (só remove campos vazios do fim)."""
+    out, log = [], []
+    for l in linhas:
+        p = l.split("|")
+        lim = MAX_CAMPOS.get(p[0])
+        if lim:
+            n0 = len(p)
+            while len(p) - 1 > lim and p[-1] == "":
+                p.pop()
+            if len(p) != n0:
+                log.append(f"{p[0]}: {n0 - len(p)} pipe(s) excedente(s) removido(s).")
+            l = "|".join(p)
+        out.append(l)
+    return out, log
+
+
 # ---------------------------------------------------------------- validação
 def validar(linhas):
     av = []
     tags = [l.split("|")[0] for l in linhas]
     if not linhas or linhas[0] != "NOTAFISCAL|1":
         av.append("Cabeçalho ≠ NOTAFISCAL|1.")
+    if "X" in tags and "X03" not in tags:
+        av.append("Grupo X presente mas X03 (transportadora) ausente.")
     for obrig in ("A", "B", "C", "E", "H", "I", "W02", "YA01"):
         if obrig not in tags:
             av.append(f"Registro obrigatório ausente: {obrig}.")
@@ -283,7 +302,15 @@ def validar(linhas):
             if prox not in TAGS_ICMS:
                 av.append(f"Linha {i}: M não seguida de grupo ICMS (veio {prox}).")
         if p[0] in MAX_CAMPOS and len(p) - 1 > MAX_CAMPOS[p[0]]:
-            av.append(f"Linha {i} ({p[0]}): campos além do limite ({MAX_CAMPOS[p[0]]}).")
+            extra = [x for x in p[1 + MAX_CAMPOS[p[0]]:] if x.strip()]
+            av.append(f"Linha {i} ({p[0]}): {len(p)-1} campos, limite {MAX_CAMPOS[p[0]]}"
+                      + (f"; conteúdo excedente não vazio: {extra}" if extra else "."))
+        if p[0] == "X03" and len(p) - 1 < 5:
+            av.append(f"Linha {i} (X03): {len(p)-1} campos, esperado 5.")
+        if p[0] in ICMS_IDX:
+            vb, vi = g(p, ICMS_IDX[p[0]][0]), g(p, ICMS_IDX[p[0]][1])
+            if vb and vi > vb:
+                av.append(f"Linha {i} ({p[0]}): vICMS ({fmt(vi)}) > vBC ({fmt(vb)}) — verificar posições.")
     n_h, n_i = tags.count("H"), tags.count("I")
     if n_h != n_i:
         av.append(f"Itens: {n_h} H vs {n_i} I.")
@@ -301,6 +328,7 @@ Posições da linha B: 1 cUF, 2 cNF(vazio), 3 natOp, 4 mod, 5 serie, 6 nNF, 7 dh
 15 tpAmb, 16 finNFe, 17 indFinal, 18 indPres, 19 procEmi, 20 verProc, 21 dhCont(vazio), 22 xJust(vazio).
 Linha I: 1 cProd, 2 cEAN, 3 xProd, 4 NCM, 6 CFOP, 7 uCom, 8 qCom, 9 vUnCom, 10 vProd,
 15 vFrete, 16 vSeg, 17 vDesc, 18 vOutro, 19 indTot.
+Grupos N04/N09/N10 no IOB: modBC|vBC|pRedBC|pICMS|vICMS (vBC antes de pRedBC).
 W02 tem exatamente 23 campos. YA01 = indPag|tPag|vPag (vPag = vNF).
 Use o MODELO (se fornecido) como referência de layout correto.
 
@@ -337,17 +365,19 @@ def revisar_com_ia(client, model, linhas, avisos_codigo, modelo_ref="", tentativ
             txt = (r.text or "").strip().removeprefix("```json").removesuffix("```").strip()
             return json.loads(txt)
         except Exception as e:  # noqa: BLE001
-            ultimo = e
+            pass
             time.sleep(3 * (t + 1))
-    return {"ajustes": [], "avisos": [f"IA indisponível: {ultimo}"]}
+    return {"ajustes": [], "avisos": [], "erro": True}  # detalhe da exceção descartado de propósito
 
 
-PROTEGIDAS = {"NOTAFISCAL", "A", "B", "W02", "YA01"}
+PROTEGIDAS = {"NOTAFISCAL", "A", "B", "W02", "YA01", "X", "X03"}
 
 
 def aplicar_patches(linhas, resposta):
     """Aplica ajustes da IA com trava de segurança. Retorna (linhas, log)."""
     log, out = [], list(linhas)
+    if resposta.get("erro"):
+        return out, log  # falha de API: nada entra no relatório
     ajustes = (resposta.get("ajustes") or [])[:15]
     for a in sorted(ajustes, key=lambda x: -int(x.get("linha", 0))):
         try:

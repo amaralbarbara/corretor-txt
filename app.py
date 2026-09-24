@@ -6,8 +6,8 @@ from pathlib import Path
 import streamlit as st
 from google import genai
 
-from iob_core import (aplicar_patches, corrigir_nota, revisar_com_ia,
-                      separar_lote, validar)
+from iob_core import (aplicar_patches, corrigir_nota, limitar_campos,
+                      revisar_com_ia, separar_lote, validar)
 
 st.set_page_config(page_title="Corretor de Lotes TXT - IOB", page_icon="💜", layout="centered")
 st.markdown(
@@ -47,7 +47,7 @@ if arquivo:
             st.error("Configure o segredo GEMINI_API_KEY ou desmarque a validação por IA.")
             st.stop()
         client = genai.Client(api_key=CHAVE) if usar_ia else None
-        buf, relatorio, resumo, usados = io.BytesIO(), [], [], set()
+        buf, relatorio, resumo, usados, falhas_ia = io.BytesIO(), [], [], set(), 0
         prog, status = st.progress(0), st.empty()
 
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
@@ -56,8 +56,10 @@ if arquivo:
                 linhas, log = corrigir_nota(bloco)
                 if usar_ia:
                     resp = revisar_com_ia(client, MODELO_IA, linhas, validar(linhas), MODELO_REF)
+                    falhas_ia += 1 if resp.get("erro") else 0
                     linhas, log_ia = aplicar_patches(linhas, resp)
-                    log += log_ia
+                    linhas, log_lim = limitar_campos(linhas)
+                    log += log_ia + log_lim
                     time.sleep(1.5)
                 pend = validar(linhas)
 
@@ -76,10 +78,14 @@ if arquivo:
             z.writestr("RELATORIO.txt", "\n\n".join(relatorio))
         status.empty()
         st.session_state["zip"], st.session_state["resumo"] = buf.getvalue(), resumo
+        st.session_state["falhas_ia"] = falhas_ia
 
 if "zip" in st.session_state:
     ok = sum(1 for _, _, p in st.session_state["resumo"] if not p)
     st.success(f"✅ Concluído. {ok}/{len(st.session_state['resumo'])} nota(s) sem pendências.")
+    if st.session_state.get("falhas_ia"):
+        st.info(f"IA não respondeu em {st.session_state['falhas_ia']} nota(s); "
+                "essas foram corrigidas e validadas só pelo código.")
     for nome, log, pend in st.session_state["resumo"]:
         with st.expander(f"{'✅' if not pend else '⚠️'} {nome} — {len(log)} correção(ões)"):
             st.write("\n".join(f"- {x}" for x in log) or "Nada alterado.")
