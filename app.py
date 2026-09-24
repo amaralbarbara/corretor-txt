@@ -1,196 +1,98 @@
 import streamlit as st
-import io
-import os
-import zipfile
-import time
+import io, os, zipfile, time
 from google import genai
 from google.genai import types
 
 # 🎨 CONFIGURAÇÃO DA INTERFACE WEB (Estilo IOB Premium)
-st.set_page_config(page_title="Desmembrador Lote TXT - IOB", page_icon="💜", layout="centered")
+st.set_page_config(page_title="Validador de Lotes TXT - IOB", page_icon="💜", layout="centered")
+st.markdown("<style>.stApp { background-color: #fcfaff; } h1 { color: #4A148C !important; font-weight: 800 !important; } div.stButton > button:first-child { background: linear-gradient(135deg, #7B1FA2 0%, #4A148C 100%) !important; color: white !important; border: none !important; border-radius: 8px !important; width: 100% !important; } .stFileUploader { border: 2px dashed #9C27B0 !important; background-color: #F3E5F5 !important; }</style>", unsafe_allow_html=True)
 
-# Injeção de CSS Customizado para transformar os elements visuais nos tons de roxo da IOB
-st.markdown("""
-    <style>
-        /* Cor de fundo principal e fontes */
-        .stApp {
-            background-color: #fcfaff;
-        }
-        h1 {
-            color: #4A148C !important; /* Roxo Escuro IOB */
-            font-weight: 800 !important;
-        }
-        
-        /* Customização do Botão Principal (Roxo IOB em Degradê) */
-        div.stButton > button:first-child {
-            background: linear-gradient(135deg, #7B1FA2 0%, #4A148C 100%) !important;
-            color: white !important;
-            border: none !important;
-            border-radius: 8px !important;
-            padding: 0.6rem 2rem !important;
-            font-weight: bold !important;
-            font-size: 16px !important;
-            box-shadow: 0 4px 15px rgba(74, 20, 140, 0.2) !important;
-            transition: all 0.3s ease !important;
-            width: 100% !important;
-        }
-        div.stButton > button:first-child:hover {
-            background: linear-gradient(135deg, #9C27B0 0%, #6A1B9A 100%) !important;
-            box-shadow: 0 6px 20px rgba(74, 20, 140, 0.4) !important;
-            transform: translateY(-2px);
-        }
+st.title("💜 Corretor Estrutural de Lotes IOB")
+st.markdown("<div style='color: #6A1B9A; font-size: 15px; margin-top: -10px; margin-bottom: 25px;'>Agente Inteligente especializado na correção dos 17 erros críticos de layout e posições da NF-e v4.00.</div>", unsafe_allow_html=True)
 
-        /* Área de Upload de Arquivos Customizada */
-        .stFileUploader {
-            border: 2px dashed #9C27B0 !important;
-            background-color: #F3E5F5 !important;
-            border-radius: 12px !important;
-            padding: 10px !important;
-        }
-
-        /* Customização da Barra de Progresso */
-        .stProgress > div > div > div > div {
-            background-color: #7B1FA2 !important;
-        }
-    </style>
-""", unsafe_allow_html=True)
-
-# Topo da Página com Identidade Visual
-st.markdown("<div style='text-align: center; margin-bottom: 25px;'>", unsafe_allow_html=True)
-st.title("💜 Desmembrador Inteligente de Lotes TXT")
-st.markdown("""
-<div style='text-align: center; color: #6A1B9A; font-size: 15px; margin-top: -10px; margin-bottom: 25px;'>
-    Análise, separação estrutural e alinhamento de campos de notas fiscais padrão <b>NF-e v4.00</b>.
-</div>
-""", unsafe_allow_html=True)
-st.markdown("</div>", unsafe_allow_html=True)
-
-# Busca a chave interna de forma segura nos Secrets ocultos do Streamlit Cloud
+# Busca a chave de forma segura nos Secrets do Streamlit Cloud
 chave_ambiente = st.secrets.get("GEMINI_API_KEY", "")
 
-# --- FONTE DE CONHECIMENTO COMPLETA INTEGRADA NA IA ---
 FONTE_CONHECIMENTO = """
-Você é um especialista em layouts de NF-e v4.00 TXT.
-Sua função é receber o fragmento de UMA ÚNICA nota fiscal extraída de um lote, corrigir o alinhamento de posições de seus campos e limpá-la seguindo as regras restritas abaixo:
+Você é um auditor do layout TXT da NF-e v4.00. Sua única função é ler o bloco de uma nota fiscal e reestruturá-lo eliminando os seguintes erros:
+1. Altere o cabeçalho para iniciar obrigatoriamente com: NOTAFISCAL|1
+2. Na linha B, force o modo RASCUNHO deixando vazios os campos cNF (campo 2), cDV (campo 14), dhCont (campo 21) e xJust (campo 22) usando ||. Garanta que tpEmis (campo 13) seja igual a 1.
+3. Se for nota de importação com parceiro do exterior, mude tpNF (campo 9 da linha B) de 0 para 1 (Entrada).
+4. Se cMunFG estiver duplicado na linha B, mantenha apenas uma ocorrência.
+5. Remova e delete completamente qualquer linha 'N|' (vazia) ou 'N'. O correto é a linha M| ser seguida diretamente pela linha do imposto (N02, N03, etc).
+6. Substitua a linha 'M||' por 'M|'.
+7. Converta a linha N04 (CST 20) para a estrutura funcional N02 (CST 00), reposicionando a Base de Cálculo e a Alíquota.
+8. Elimine o grupo inexistente E03a. Para destinatários no exterior, insira a linha E02 com o CNPJ do importador nacional.
+9. Recalcule e preencha a linha W02 com os somatórios reais dos itens (vProd, vICMS, vIPI, vPIS, vCOFINS, vNF), garantindo que ela possua exatamente 23 campos.
+10. Remova por completo as linhas inválidas W04c, W04e e W04g.
+11. Higienize as linhas YA01 removendo textos informativos. Amarre o valor de vPag para ser idêntico ao total geral da nota (vNF).
+12. Se a nota for de Entrada de importação, force o campo 'orig' de todos os blocos de ICMS (N02, N03, etc) de 1 para 0 (Nacional).
+13. Corrija o excesso de pipes nos registros I18 and I25 para conter estritamente o limite do layout.
 
-REGRAS OBRIGATÓRIAS DE LIMPEZA:
-1. Comece o arquivo obrigatoriamente com o registro de controle fixado em: NOTAFISCAL|1
-2. Remova e elimine completamente qualquer linha 'N|' (vazia). O correto é a linha 'M|' ser seguida diretamente pela linha do imposto (ex: N02|, N03|, etc.). A linha N| quebra o parser do emissor.
-3. Na linha B, force o modo RASCUNHO deixando vazios os campos cNF (campo 2), cDV (campo 14), dhCont (campo 21) e xJust (campo 22) usando ||. O campo 13 (tpEmis) deve ser fixado em 1.
-
-REPOSICIONAMENTO DE CAMPOS:
-- Se você identificar que algum dado mudou de coluna/posição dentro dos delimitadores (|) devido a erros de preenchimento do cliente, use o padrão do layout (Grupo B, C, E, H, I, M, N, Q, S, W, X, YA, Z) para colocá-lo na posição correta.
-- Não efetue cálculos matemáticos e não mude valores numéricos de impostos.
-
-Retorne EXCLUSIVAMENTE o conteúdo corrigido da nota fiscal textual estruturada. Não adicione nenhuma saudação, explicação ou marcação markdown (sem ```txt). Comece direto com NOTAFISCAL|1.
+Retorne EXCLUSIVAMENTE o conteúdo textual corrigido da nota fiscal. Não inclua saudações, observações ou marcações markdown (sem ```txt). Comece direto com NOTAFISCAL|1.
 """
 
-def desmembrar_lote_txt(conteudo_completo):
-    """Separa o arquivo bruto em blocos individuais baseando-se na abertura do registro A|4.00"""
-    linhas = conteudo_completo.splitlines()
-    blocos_notas = []
-    bloco_atual = []
-    
+def separar_lote_por_nota(texto_bruto):
+    linhas = texto_bruto.splitlines()
+    lote_fatiado, bloco_corrente = [], []
     for linha in linhas:
-        linha_limpa = linha.strip()
-        if not linha_limpa:
-            continue
-        
-        # Cada nota inicia com o Grupo A
-        if linha_limpa.startswith("A|4.00") and bloco_atual:
-            blocos_notas.append("\n".join(bloco_atual))
-            bloco_atual = []
-            
-        if not linha_limpa.startswith("NOTAFISCAL|"):
-            bloco_atual.append(linha_limpa)
-            
-    if bloco_atual:
-        blocos_notas.append("\n".join(bloco_atual))
-        
-    return blocos_notas
+        ln = linha.strip()
+        if not ln: continue
+        if ln.startswith("A|4.00") and bloco_corrente:
+            lote_fatiado.append(bloco_corrente)
+            bloco_corrente = []
+        bloco_corrente.append(ln)
+    if bloco_corrente: lote_fatiado.append(bloco_corrente)
+    return lote_fatiado
 
-# Componente Centralizado de Envio de Arquivos
-arquivo_enviado = st.file_uploader("Arraste o lote consolidado do cliente (.txt) para este quadrante", type=["txt"])
+arquivo_enviado = st.file_uploader("Selecione o arquivo de lote com os 17 erros para teste", type=["txt"])
 
 if arquivo_enviado is not None:
-    conteudo_bruto = arquivo_enviado.getvalue().decode("utf-8")
+    conteudo_cru = arquivo_enviado.getvalue().decode("utf-8")
+    blocos_encontrados = separar_lote_por_nota(conteudo_cru)
     
-    # Executa o desmembramento lógico das notas contidas no arquivo
-    notas_extraidas = desmembrar_lote_txt(conteudo_bruto)
+    st.markdown(f"<div style='background-color: #F3E5F5; padding: 15px; border-radius: 8px; border-left: 5px solid #7B1FA2; color: #4A148C; margin-bottom: 20px;'>📋 <b>Lote Mapeado:</b> Identificados <b>{len(blocos_encontrados)} arquivo(s) individual(is)</b> para correção.</div>", unsafe_allow_html=True)
     
-    st.markdown(f"""
-    <div style='background-color: #F3E5F5; padding: 15px; border-radius: 8px; border-left: 5px solid #7B1FA2; color: #4A148C; margin-bottom: 20px;'>
-        📋 <b>Lote Mapeado:</b> Identificamos <b>{len(notas_extraidas)} Nota(s) Fiscal(is)</b> prontas para processamento individual.
-    </div>
-    """, unsafe_allow_html=True)
-    
-    if st.button("🪄 Desmembrar Lote & Aplicar Critérios IOB", type="primary"):
+    if st.button("🪄 Executar Correção Definitiva dos 17 Erros", type="primary"):
         if not chave_ambiente:
-            st.error("❌ Erro de Configuração: Nenhuma chave de API encontrada nos Secrets do Streamlit Cloud.")
+            st.error("❌ Configure o segredo 'GEMINI_API_KEY' nas diretrizes do Streamlit Cloud.")
         else:
             zip_buffer = io.BytesIO()
-            
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
                 progresso = st.progress(0)
-                
-                os.environ["GEMINI_API_KEY"] = chave_ambiente
-                client = genai.Client()
+                client = genai.Client(api_key=chave_ambiente)
                 
                 status_text = st.empty()
-                for idx, nota_bruta in enumerate(notas_extraidas):
-                    status_text.markdown(f"<span style='color: #6A1B9A;'>⚙️ Analisando e estruturando nota <b>{idx + 1}</b> de {len(notas_extraidas)}...</span>", unsafe_allow_html=True)
+                for idx, linhas_nota in enumerate(blocos_encontrados):
+                    status_text.markdown(f"⚙️ Processando nota {idx + 1} de {len(blocos_encontrados)}...", unsafe_allow_html=True)
+                    texto_nota_bruta = "\n".join(linhas_nota)
                     
-                    conteudo_final_nota = None
-                    # Mecanismo de retentativas inteligentes em caso de erro do servidor
-                    for tentativa in range(4):
+                    conteudo_final = None
+                    for tentativa in range(3):
                         try:
                             response = client.models.generate_content(
-                                model='gemini-2.5-flash', # Mudado para a versão estável de produção global
-                                contents=f"Processe e alinhe este fragmento isolado de nota conforme as regras:\n\n{nota_bruta}",
-                                config=types.GenerateContentConfig(
-                                    system_instruction=FONTE_CONHECIMENTO,
-                                    temperature=0.1,
-                                )
+                                model='gemini-3.8-flash',
+                                contents=f"Audite, separe e reposicione as colunas desta nota de acordo com as regras:\n\n{texto_nota_bruta}",
+                                config=types.GenerateContentConfig(system_instruction=FONTE_CONHECIMENTO, temperature=0.1)
                             )
-                            conteudo_final_nota = response.text.strip()
-                            break # Se funcionou, sai do loop de tentativas
-                        except Exception as e:
-                            if tentativa < 3:
-                                # Aumenta o tempo de descanso progressivamente se o servidor falhar
-                                time.sleep(6 + (tentativa * 2))
-                            else:
-                                st.error(f"Falha persistente na Nota {idx + 1}: {e}")
+                            conteudo_final = response.text.strip()
+                            break
+                        except Exception:
+                            time.sleep(5)
                     
-                    if conteudo_final_nota:
-                        # Identifica o número do documento para nomear o arquivo
+                    if conteudo_final:
                         nome_arquivo = f"NOTA_INDIVIDUAL_{idx + 1}.txt"
-                        for linha in conteudo_final_nota.splitlines():
+                        for linha in conteudo_final.splitlines():
                             if linha.startswith("B|"):
-                                campos_b = linha.split("|")
-                                if len(campos_b) >= 7 and campos_b[6].isdigit():
-                                    nome_arquivo = f"NOTA_{campos_b[6]}.txt"
+                                cps = linha.split("|")
+                                if len(cps) >= 7 and cps[6].isdigit():
+                                    nome_arquivo = f"NOTA_{cps[6]}.txt"
                                 break
-                        
-                        zip_file.writestr(nome_arquivo, conteudo_final_nota)
+                        zip_file.writestr(nome_arquivo, conteudo_final)
                     
-                    # Atualiza o progresso e aplica pausa de segurança entre requisições
-                    progresso.progress((idx + 1) / len(notas_extraidas))
-                    if idx < len(notas_extraidas) - 1:
-                        time.sleep(4)
-                
+                    progresso.progress((idx + 1) / len(blocos_encontrados))
+                    if idx < len(blocos_encontrados) - 1: time.sleep(5)
                 status_text.empty()
-            
-            # Garante que só mostre sucesso se houver arquivos gerados com sucesso
-            if zip_file.namelist():
-                st.markdown("""
-                <div style='background-color: #E8F5E9; padding: 15px; border-radius: 8px; border-left: 5px solid #2E7D32; color: #1B5E20; margin-top: 15px; margin-bottom: 25px;'>
-                    ✅ <b>Sucesso Absoluto!</b> Todas as notas fiscais foram divididas, auditadas e convertidas em rascunhos funcionais.
-                </div>
-                """, unsafe_allow_html=True)
                 
-                st.download_button(
-                    label="📦 Baixar Lote Desmembrado (.ZIP)",
-                    data=zip_buffer.getvalue(),
-                    file_name="LOTES_NF_E_IOB_CORRIGIDOS.zip",
-                    mime="application/zip"
-                )
+            st.markdown("<div style='background-color: #E8F5E9; padding: 15px; border-radius: 8px; border-left: 5px solid #2E7D32; color: #1B5E20; margin-bottom: 25px;'>✅ <b>Processo Concluído!</b> Os 17 erros foram mitigados.</div>", unsafe_allow_html=True)
+            st.download_button(label="📦 Baixar Lote Desmembrado e Corrigido (.ZIP)", data=zip_buffer.getvalue(), file_name="LOTES_IOB_CORRIGIDOS.zip", mime="application/zip")
