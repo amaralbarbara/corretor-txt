@@ -77,11 +77,13 @@ if arquivo_enviado is not None:
         else:
             with st.spinner("A IA está interpretando o arquivo e reposicionando os campos..."):
                 try:
+                    # Aplica a chave na configuração do ambiente para o SDK ler de forma nativa
                     os.environ["GEMINI_API_KEY"] = chave_ativa
                     client = genai.Client()
                     
+                    # Chamada utilizando a versão de motor mais recente exigida (Gemini 3.8 Flash)
                     response = client.models.generate_content(
-                        model='gemini-2.5-flash',
+                        model='gemini-3.8-flash',
                         contents=f"Aqui está o TXT com problemas do cliente:\n\n{conteudo_cliente}",
                         config=types.GenerateContentConfig(
                             system_instruction=FONTE_CONHECIMENTO,
