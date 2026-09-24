@@ -24,7 +24,7 @@ st.markdown("""
         div.stButton > button:first-child {
             background: linear-gradient(135deg, #7B1FA2 0%, #4A148C 100%) !important;
             color: white !important;
-            border-core: none !important;
+            border: none !important;
             border-radius: 8px !important;
             padding: 0.6rem 2rem !important;
             font-weight: bold !important;
@@ -51,15 +51,8 @@ st.markdown("""
         .stProgress > div > div > div > div {
             background-color: #7B1FA2 !important;
         }
-        
-        /* Caixa de Alerta Informativo */
-        .stAlert {
-            border-left: 5px solid #4A148C !important;
-            border-radius: 8px !important;
-            background-color: #F3E5F5 !important;
-        }
     </style>
-""", unsafe_gradient=True, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
 # Topo da Página com Identidade Visual
 st.markdown("<div style='text-align: center; margin-bottom: 25px;'>", unsafe_allow_html=True)
@@ -88,7 +81,7 @@ REPOSICIONAMENTO DE CAMPOS:
 - Se você identificar que algum dado mudou de coluna/posição dentro dos delimitadores (|) devido a erros de preenchimento do cliente, use o padrão do layout (Grupo B, C, E, H, I, M, N, Q, S, W, X, YA, Z) para colocá-lo na posição correta.
 - Não efetue cálculos matemáticos e não mude valores numéricos de impostos.
 
-Retorne EXCLUSIVAMENTE o conteúdo corrigido da nota fiscal textual estruturada. Não adicione nenhuma saudação, explicação ou marcação markdown (sem ```txt). Comece direto com NOTAFISCAL|1.
+Retorne EXCLUSIVAMENTE o conteúdo corrigido da nota fiscal textual estruturada. Não adicione nenhuma saudação, explicação ou explicação em markdown (sem ```txt). Comece direto com NOTAFISCAL|1.
 """
 
 def desmembrar_lote_txt(conteudo_completo):
@@ -125,7 +118,7 @@ if arquivo_enviado is not None:
     notas_extraidas = desmembrar_lote_txt(conteudo_bruto)
     
     st.markdown(f"""
-    <div style='background-color: #E8EAF6; padding: 15px; border-radius: 8px; border-left: 5px solid #3F51B5; color: #1A237E; margin-bottom: 20px;'>
+    <div style='background-color: #F3E5F5; padding: 15px; border-radius: 8px; border-left: 5px solid #7B1FA2; color: #4A148C; margin-bottom: 20px;'>
         📋 <b>Lote Mapeado:</b> Identificamos <b>{len(notas_extraidas)} Nota(s) Fiscal(is)</b> prontas para processamento individual.
     </div>
     """, unsafe_allow_html=True)
@@ -144,8 +137,8 @@ if arquivo_enviado is not None:
                 os.environ["GEMINI_API_KEY"] = chave_ambiente
                 client = genai.Client()
                 
+                status_text = st.empty()
                 for idx, nota_bruta in enumerate(notas_extraidas):
-                    status_text = st.empty()
                     status_text.markdown(f"<span style='color: #6A1B9A;'>⚙️ Processando e alinhando nota <b>{idx + 1}</b> de {len(notas_extraidas)}...</span>", unsafe_allow_html=True)
                     
                     try:
@@ -176,7 +169,7 @@ if arquivo_enviado is not None:
                     except Exception as error_ia:
                         st.error(f"Erro na Nota {idx + 1}: {error_ia}")
                     
-                    # Atualiza barra de progresso visual
+                    # box de progresso visual
                     progresso.progress((idx + 1) / len(notas_extraidas))
                 
                 status_text.empty() # Limpa o texto de processamento ao finalizar
