@@ -1,107 +1,196 @@
 import streamlit as st
 import io
 import os
+import zipfile
 from google import genai
 from google.genai import types
 
-# Configuração da Interface Web
-st.set_page_config(page_title="Validador Inteligente de TXT", page_icon="🤖", layout="centered")
+# 🎨 CONFIGURAÇÃO DA INTERFACE WEB (Estilo IOB Premium)
+st.set_page_config(page_title="Desmembrador Lote TXT - IOB", page_icon="💜", layout="centered")
 
-st.title("🤖 Corretor Estrutural de TXT NF-e v4.00")
+# Injeção de CSS Customizado para transformar os elementos visuais nos tons de roxo da IOB
 st.markdown("""
-Esta ferramenta utiliza **Inteligência Artificial** para interpretar, mapear e corrigir a **posição dos campos** 
-do TXT do seu cliente, baseando-se estritamente nas regras oficiais do layout.
-""")
+    <style>
+        /* Cor de fundo principal e fontes */
+        .stApp {
+            background-color: #fcfaff;
+        }
+        h1 {
+            color: #4A148C !important; /* Roxo Escuro IOB */
+            font-weight: 800 !important;
+        }
+        
+        /* Customização do Botão Principal (Roxo IOB em Degradê) */
+        div.stButton > button:first-child {
+            background: linear-gradient(135deg, #7B1FA2 0%, #4A148C 100%) !important;
+            color: white !important;
+            border-core: none !important;
+            border-radius: 8px !important;
+            padding: 0.6rem 2rem !important;
+            font-weight: bold !important;
+            font-size: 16px !important;
+            box-shadow: 0 4px 15px rgba(74, 20, 140, 0.2) !important;
+            transition: all 0.3s ease !important;
+            width: 100% !important;
+        }
+        div.stButton > button:first-child:hover {
+            background: linear-gradient(135deg, #9C27B0 0%, #6A1B9A 100%) !important;
+            box-shadow: 0 6px 20px rgba(74, 20, 140, 0.4) !important;
+            transform: translateY(-2px);
+        }
 
-# Busca a chave de forma segura nos Secrets do Streamlit Cloud
+        /* Área de Upload de Arquivos Customizada */
+        .stFileUploader {
+            border: 2px dashed #9C27B0 !important;
+            background-color: #F3E5F5 !important;
+            border-radius: 12px !important;
+            padding: 10px !important;
+        }
+
+        /* Customização da Barra de Progresso */
+        .stProgress > div > div > div > div {
+            background-color: #7B1FA2 !important;
+        }
+        
+        /* Caixa de Alerta Informativo */
+        .stAlert {
+            border-left: 5px solid #4A148C !important;
+            border-radius: 8px !important;
+            background-color: #F3E5F5 !important;
+        }
+    </style>
+""", unsafe_gradient=True, unsafe_allow_html=True)
+
+# Topo da Página com Identidade Visual
+st.markdown("<div style='text-align: center; margin-bottom: 25px;'>", unsafe_allow_html=True)
+st.title("💜 Desmembrador Inteligente de Lotes TXT")
+st.markdown("""
+<div style='text-align: center; color: #6A1B9A; font-size: 15px; margin-top: -10px; margin-bottom: 25px;'>
+    Análise, separação estrutural e alinhamento de campos de notas fiscais padrão <b>NF-e v4.00</b>.
+</div>
+""", unsafe_allow_html=True)
+st.markdown("</div>", unsafe_allow_html=True)
+
+# Busca a chave interna de forma segura nos Secrets ocultos do Streamlit Cloud
 chave_ambiente = st.secrets.get("GEMINI_API_KEY", "")
 
-# Input na barra lateral (Mascarado por segurança)
-api_key = st.sidebar.text_input("Sua Gemini API Key:", value=chave_ambiente, type="password")
-st.sidebar.markdown("[Link da Fonte de Conhecimento Oficial (Google Drive)](https://google.com)")
-
-# --- CONTEÚDO INTEGRAL DA SUA FONTE DE CONHECIMENTO ---
+# --- FONTE DE CONHECIMENTO COMPLETA INTEGRADA NA IA ---
 FONTE_CONHECIMENTO = """
-Você é um interpretador e especialista em layouts de NF-e v4.00 TXT.
-Sua única função é ler o TXT bagunçado ou desalinhado enviado pelo cliente, identificar quais informações foram colocadas nas posições erradas por erro de preenchimento ou geração do sistema deles, e reconstruir o TXT colocando cada dado na sua posição correta de acordo com as regras estruturais exatas mapeadas abaixo:
+Você é um especialista em layouts de NF-e v4.00 TXT.
+Sua função é receber o fragmento de UMA ÚNICA nota fiscal extraída de um lote, corrigir o alinhamento de posições de seus campos e limpá-la seguindo as regras restritas abaixo:
 
-================================================================================
-LAYOUT COMPLETO TXT NF-e v4.00 — MAPEADO CAMPO A CAMPO
-================================================================================
-📌 RESUMO DA ESTRUTURA DOS BLOCOS DE IMPOSTO:
-Cada item obrigatoriamente deve seguir esta sequência:
-H|... (Cabeçalho do item)
-I|... (Dados do Produto)
-M|    <- LINHA M (vazia) OBRIGATÓRIA
-N02|0|00|3|... <- BLOCO DE ICMS DIRETO (SEM A LINHA N|)
+REGRAS OBRIGATÓRIAS DE LIMPEZA:
+1. Comece o arquivo obrigatoriamente com o registro de controle fixado em: NOTAFISCAL|1
+2. Remova e elimine completamente qualquer linha 'N|' (vazia). O correto é a linha 'M|' ser seguida diretamente pela linha do imposto (ex: N02|, N03|, etc.). A linha N| quebra o parser do emissor.
+3. Na linha B, force o modo RASCUNHO deixando vazios os campos cNF (campo 2), cDV (campo 14), dhCont (campo 21) e xJust (campo 22) usando ||. O campo 13 (tpEmis) deve ser fixado em 1.
 
-⚠️ ATENÇÃO MÁXIMA: A linha N| (vazia) NÃO DEVE EXISTIR! O parser do sistema a interpreta como "FIM DE BLOCO" e corrompe a nota. Remova-a sempre se o cliente a enviar. O correto é M| seguido direto de N02|, N07|, etc.
+REPOSICIONAMENTO DE CAMPOS:
+- Se você identificar que algum dado mudou de coluna/posição dentro dos delimitadores (|) devido a erros de preenchimento do cliente, use o padrão do layout (Grupo B, C, E, H, I, M, N, Q, S, W, X, YA, Z) para colocá-lo na posição correta.
+- Não efetue cálculos matemáticos e não mude valores numéricos de impostos.
 
-⚠️ REGRA DE OURO — TORNAR A NOTA UM RASCUNHO (NÃO IMPORTADA):
-Na linha B (Identificação da NF-e), limpe as informações para forçar o nascimento como rascunho:
-1. cNF (campo 2 da linha B) DEVE FICAR VAZIO (||)
-2. cDV (campo 14 da linha B) DEVE FICAR VAZIO (||)
-3. tpEmis (campo 13 da linha B) DEVE SER FORÇADO PARA 1 (Normal)
-4. dhCont (campo 21) e xJust (campo 22) DEVEM FICAR VAZIOS (||)
-
-⚠️ REGRA DE OURO — COMPREENSÃO DE POSIÇÕES DOS GRUPOS:
-As linhas são delimitadas por pipes (|). Se o cliente moveu informações de lugar por erro (ex: colocou NCM na coluna errada, ou inverteu a ordem de Razão Social), use sua inteligência de interpretação para identificar o que é o dado e reposicione-o no campo correto conforme o mapeamento abaixo:
-- GRUPO B: B|<cUF>|<cNF>|<natOp>|<mod>|<serie>|<nNF>|<dhEmi>|<dhSaiEnt>|<tpNF>|<idDest>|<cMunFG>|<tpImp>|<tpEmis>|<cDV>|<tpAmb>|<finNFe>|<indFinal>|<indPres>|<procEmi>|<verProc>|<dhCont>|<xJust>|<indIntermed>|
-- GRUPO C (Emitente): C|<xNome>|<xFant>|<IE>|<IEST>|<IM>|<CNAE>|<CRT>| -> Seguido de C02|<CNPJ>| e C05|Endereço|
-- GRUPO E (Destinatário): E|<xNome>|<indIEDest>|<IE>|<ISUF>|<IM>|<email>| -> Seguido de E02|<CNPJ>| e E05|Endereço|
-- GRUPO I (Produto): I|<cProd>|<cEAN>|<xProd>|<NCM>|<cBenef>|<EXTIPI>|<CFOP>|<uCom>|<qCom>|<vUnCom>|<vProd>|<cEANTrib>|<uTrib>|<qTrib>|<vUnTrib>|<vFrete>|<vSeg>|<vDesc>|<vOutro>|<indTot>|
-- GRUPO Q (PIS): Linha Q vazia obrigatória antes de Q02|
-- GRUPO S (COFINS): Linha S vazia obrigatória antes de S02|
-- GRUPO W (Totais): Linha W vazia obrigatória antes de W02|
-
-Não recalcule nenhum valor matemático. Apenas garanta que cada dado esteja exatamente no cano/coluna correto do layout de pipes (|).
-Se houver múltiplas notas (NOTAFISCAL|N com N > 1), processe apenas a primeira ou certifique-se de separar os blocos mantendo a coerência.
-
-Retorne APENAS o conteúdo do novo arquivo TXT corrigido. Não adicione nenhuma saudação, explicação ou formatação markdown (sem ```txt). Comece direto com NOTAFISCAL|1.
+Retorne EXCLUSIVAMENTE o conteúdo corrigido da nota fiscal textual estruturada. Não adicione nenhuma saudação, explicação ou marcação markdown (sem ```txt). Comece direto com NOTAFISCAL|1.
 """
 
-# Carregar o arquivo do cliente
-arquivo_enviado = st.file_uploader("Arraste ou selecione o arquivo .txt do cliente", type=["txt"])
+def desmembrar_lote_txt(conteudo_completo):
+    """Separa o arquivo bruto em blocos individuais baseando-se na abertura do registro A|4.00"""
+    linhas = conteudo_completo.splitlines()
+    blocos_notas = []
+    bloco_atual = []
+    
+    for linha in linhas:
+        linha_limpa = linha.strip()
+        if not linha_limpa:
+            continue
+        
+        # Cada nota inicia com o Grupo A
+        if linha_limpa.startswith("A|4.00") and bloco_atual:
+            blocos_notas.append("\n".join(bloco_atual))
+            bloco_atual = []
+            
+        if not linha_limpa.startswith("NOTAFISCAL|"):
+            bloco_atual.append(linha_limpa)
+            
+    if bloco_atual:
+        blocos_notas.append("\n".join(bloco_atual))
+        
+    return blocos_notas
+
+# Componente Centralizado de Envio de Arquivos
+arquivo_enviado = st.file_uploader("Arraste o lote consolidado do cliente (.txt) para este quadrante", type=["txt"])
 
 if arquivo_enviado is not None:
-    conteudo_cliente = arquivo_enviado.getvalue().decode("utf-8")
+    conteudo_bruto = arquivo_enviado.getvalue().decode("utf-8")
     
-    st.subheader("Conteúdo Original do Cliente (Para Análise)")
-    st.text_area("O que o cliente enviou:", conteudo_cliente, height=200, disabled=True)
+    # Executa o desmembramento lógico das notas contidas no arquivo
+    notas_extraidas = desmembrar_lote_txt(conteudo_bruto)
     
-    if st.button("🪄 Corrigir Posições e Estrutura com IA", type="primary"):
-        chave_ativa = api_key if api_key else chave_ambiente
-        
-        if not chave_ativa:
-            st.error("❌ Nenhuma API Key encontrada. Configure os Secrets do app ou insira na barra lateral.")
+    st.markdown(f"""
+    <div style='background-color: #E8EAF6; padding: 15px; border-radius: 8px; border-left: 5px solid #3F51B5; color: #1A237E; margin-bottom: 20px;'>
+        📋 <b>Lote Mapeado:</b> Identificamos <b>{len(notas_extraidas)} Nota(s) Fiscal(is)</b> prontas para processamento individual.
+    </div>
+    """, unsafe_allow_html=True)
+    
+    if st.button("🪄 Desmembrar Lote & Aplicar Critérios IOB", type="primary"):
+        if not chave_ambiente:
+            st.error("❌ Erro de Configuração: Nenhuma chave de API encontrada nos Secrets do Streamlit Cloud.")
         else:
-            with st.spinner("A IA está interpretando o arquivo e reposicionando os campos..."):
-                try:
-                    # Aplica a chave na configuração do ambiente para o SDK ler de forma nativa
-                    os.environ["GEMINI_API_KEY"] = chave_ativa
-                    client = genai.Client()
+            # Criar um arquivo ZIP em memória para armazenar as respostas individuais
+            zip_buffer = io.BytesIO()
+            
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+                progresso = st.progress(0)
+                
+                # Configura a credencial interna no ambiente operacional do script
+                os.environ["GEMINI_API_KEY"] = chave_ambiente
+                client = genai.Client()
+                
+                for idx, nota_bruta in enumerate(notas_extraidas):
+                    status_text = st.empty()
+                    status_text.markdown(f"<span style='color: #6A1B9A;'>⚙️ Processando e alinhando nota <b>{idx + 1}</b> de {len(notas_extraidas)}...</span>", unsafe_allow_html=True)
                     
-                    # Chamada utilizando a versão de motor mais recente exigida (Gemini 3.8 Flash)
-                    response = client.models.generate_content(
-                        model='gemini-3.8-flash',
-                        contents=f"Aqui está o TXT com problemas do cliente:\n\n{conteudo_cliente}",
-                        config=types.GenerateContentConfig(
-                            system_instruction=FONTE_CONHECIMENTO,
-                            temperature=0.1,
+                    try:
+                        # IA processa cada bloco de forma isolada e limpa
+                        response = client.models.generate_content(
+                            model='gemini-3.8-flash',
+                            contents=f"Processe e alinhe este fragmento isolado de nota conforme as regras:\n\n{nota_bruta}",
+                            config=types.GenerateContentConfig(
+                                system_instruction=FONTE_CONHECIMENTO,
+                                temperature=0.1,
+                            )
                         )
-                    )
+                        
+                        conteudo_final_nota = response.text.strip()
+                        
+                        # Tenta extrair o número da nota (nNF - campo 6 da linha B) para dar nome correto ao arquivo
+                        nome_arquivo = f"NOTA_INDIVIDUAL_{idx + 1}.txt"
+                        for linha in nota_bruta.splitlines():
+                            if linha.startswith("B|"):
+                                campos_b = linha.split("|")
+                                if len(campos_b) >= 7 and campos_b[6].isdigit():
+                                    nome_arquivo = f"NOTA_{campos_b[6]}.txt"
+                                break
+                        
+                        # Salva o arquivo individual corrigido dentro do ZIP
+                        zip_file.writestr(nome_arquivo, conteudo_final_nota)
+                        
+                    except Exception as error_ia:
+                        st.error(f"Erro na Nota {idx + 1}: {error_ia}")
                     
-                    txt_corrigido = response.text.strip()
-                    
-                    st.success("✅ Arquivo interpretado e corrigido com sucesso!")
-                    st.text_area("TXT com campos reposicionados corretamente:", txt_corrigido, height=300)
-                    
-                    st.download_button(
-                        label="📥 Baixar TXT Corrigido",
-                        data=txt_corrigido,
-                        file_name=f"ESTRUTURADO_{arquivo_enviado.name}",
-                        mime="text/plain"
-                    )
-                    
-                except Exception as e:
-                    st.error(f"Erro ao processar com a IA: {e}")
+                    # Atualiza barra de progresso visual
+                    progresso.progress((idx + 1) / len(notas_extraidas))
+                
+                status_text.empty() # Limpa o texto de processamento ao finalizar
+            
+            st.markdown("""
+            <div style='background-color: #E8F5E9; padding: 15px; border-radius: 8px; border-left: 5px solid #2E7D32; color: #1B5E20; margin-top: 15px; margin-bottom: 25px;'>
+                ✅ <b>Sucesso Absoluto!</b> Todas as notas fiscais foram divididas, auditadas e convertidas em rascunhos funcionais.
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Disponibiliza o download do lote desmembrado em formato .ZIP
+            st.download_button(
+                label="📦 Baixar Lote Desmembrado (.ZIP)",
+                data=zip_buffer.getvalue(),
+                file_name="LOTES_NF_E_IOB_CORRIGIDOS.zip",
+                mime="application/zip"
+            )
