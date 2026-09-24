@@ -2,11 +2,12 @@ import streamlit as st
 import io
 import os
 import zipfile
+import time
 from google import genai
 from google.genai import types
 
 # 🎨 CONFIGURAÇÃO DA INTERFACE WEB (Estilo IOB Premium)
-st.set_page_config(page_title="Corretor TXT - IOB", page_icon="", layout="centered")
+st.set_page_config(page_title="Desmembrador Lote TXT - IOB", page_icon="💜", layout="centered")
 
 # Injeção de CSS Customizado para transformar os elementos visuais nos tons de roxo da IOB
 st.markdown("""
@@ -56,7 +57,7 @@ st.markdown("""
 
 # Topo da Página com Identidade Visual
 st.markdown("<div style='text-align: center; margin-bottom: 25px;'>", unsafe_allow_html=True)
-st.title("Corretor de TXT")
+st.title("💜 Desmembrador Inteligente de Lotes TXT")
 st.markdown("""
 <div style='text-align: center; color: #6A1B9A; font-size: 15px; margin-top: -10px; margin-bottom: 25px;'>
     Análise, separação estrutural e alinhamento de campos de notas fiscais padrão <b>NF-e v4.00</b>.
@@ -81,7 +82,7 @@ REPOSICIONAMENTO DE CAMPOS:
 - Se você identificar que algum dado mudou de coluna/posição dentro dos delimitadores (|) devido a erros de preenchimento do cliente, use o padrão do layout (Grupo B, C, E, H, I, M, N, Q, S, W, X, YA, Z) para colocá-lo na posição correta.
 - Não efetue cálculos matemáticos e não mude valores numéricos de impostos.
 
-Retorne EXCLUSIVAMENTE o conteúdo corrigido da nota fiscal textual estruturada. Não adicione nenhuma saudação, explicação ou explicação em markdown (sem ```txt). Comece direto com NOTAFISCAL|1.
+Retorne EXCLUSIVAMENTE o conteúdo corrigido da nota fiscal textual estruturada. Não adicione nenhuma saudação, explicação ou marcação markdown (sem ```txt). Comece direto com NOTAFISCAL|1.
 """
 
 def desmembrar_lote_txt(conteudo_completo):
@@ -127,34 +128,41 @@ if arquivo_enviado is not None:
         if not chave_ambiente:
             st.error("❌ Erro de Configuração: Nenhuma chave de API encontrada nos Secrets do Streamlit Cloud.")
         else:
-            # Criar um arquivo ZIP em memória para armazenar as respostas individuais
             zip_buffer = io.BytesIO()
             
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
                 progresso = st.progress(0)
                 
-                # Configura a credencial interna no ambiente operacional do script
                 os.environ["GEMINI_API_KEY"] = chave_ambiente
                 client = genai.Client()
                 
                 status_text = st.empty()
                 for idx, nota_bruta in enumerate(notas_extraidas):
-                    status_text.markdown(f"<span style='color: #6A1B9A;'>⚙️ Processando e alinhando nota <b>{idx + 1}</b> de {len(notas_extraidas)}...</span>", unsafe_allow_html=True)
+                    status_text.markdown(f"<span style='color: #6A1B9A;'>⚙️ Analisando e estruturando nota <b>{idx + 1}</b> de {len(notas_extraidas)}...</span>", unsafe_allow_html=True)
                     
-                    try:
-                        # IA processa cada bloco de forma isolada e limpa
-                        response = client.models.generate_content(
-                            model='gemini-3.8-flash',
-                            contents=f"Processe e alinhe este fragmento isolado de nota conforme as regras:\n\n{nota_bruta}",
-                            config=types.GenerateContentConfig(
-                                system_instruction=FONTE_CONHECIMENTO,
-                                temperature=0.1,
+                    conteudo_final_nota = None
+                    # Mecanismo de retentativas inteligentes em caso de erro do servidor
+                    for tentativa in range(3):
+                        try:
+                            response = client.models.generate_content(
+                                model='gemini-3.8-flash',
+                                contents=f"Processe e alinhe este fragmento isolado de nota conforme as regras:\n\n{nota_bruta}",
+                                config=types.GenerateContentConfig(
+                                    system_instruction=FONTE_CONHECIMENTO,
+                                    temperature=0.1,
+                                )
                             )
-                        )
-                        
-                        conteudo_final_nota = response.text.strip()
-                        
-                        # Tenta extrair o número da nota (nNF - campo 6 da linha B) para dar nome correto ao arquivo
+                            conteudo_final_nota = response.text.strip()
+                            break # Se funcionou, sai do loop de tentativas
+                        except Exception as e:
+                            # Se estourou cota ou indisponibilidade, espera mais tempo antes de re-tentar
+                            if tentativa < 2:
+                                time.sleep(6)
+                            else:
+                                st.error(f"Falha persistente na Nota {idx + 1}: {e}")
+                    
+                    if conteudo_final_nota:
+                        # Identifica o número do documento para nomear o arquivo
                         nome_arquivo = f"NOTA_INDIVIDUAL_{idx + 1}.txt"
                         for linha in nota_bruta.splitlines():
                             if linha.startswith("B|"):
@@ -163,16 +171,14 @@ if arquivo_enviado is not None:
                                     nome_arquivo = f"NOTA_{campos_b[6]}.txt"
                                 break
                         
-                        # Salva o arquivo individual corrigido dentro do ZIP
                         zip_file.writestr(nome_arquivo, conteudo_final_nota)
-                        
-                    except Exception as error_ia:
-                        st.error(f"Erro na Nota {idx + 1}: {error_ia}")
                     
-                    # box de progresso visual
+                    # Atualiza o progresso e aplica pausa de segurança de 5 segundos (evita erro 429)
                     progresso.progress((idx + 1) / len(notas_extraidas))
+                    if idx < len(notas_extraidas) - 1:
+                        time.sleep(5)
                 
-                status_text.empty() # Limpa o texto de processamento ao finalizar
+                status_text.empty()
             
             st.markdown("""
             <div style='background-color: #E8F5E9; padding: 15px; border-radius: 8px; border-left: 5px solid #2E7D32; color: #1B5E20; margin-top: 15px; margin-bottom: 25px;'>
@@ -180,7 +186,6 @@ if arquivo_enviado is not None:
             </div>
             """, unsafe_allow_html=True)
             
-            # Disponibiliza o download do lote desmembrado em formato .ZIP
             st.download_button(
                 label="📦 Baixar Lote Desmembrado (.ZIP)",
                 data=zip_buffer.getvalue(),
