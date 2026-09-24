@@ -9,7 +9,7 @@ from google.genai import types
 # 🎨 CONFIGURAÇÃO DA INTERFACE WEB (Estilo IOB Premium)
 st.set_page_config(page_title="Desmembrador Lote TXT - IOB", page_icon="💜", layout="centered")
 
-# Injeção de CSS Customizado para transformar os elementos visuais nos tons de roxo da IOB
+# Injeção de CSS Customizado para transformar os elements visuais nos tons de roxo da IOB
 st.markdown("""
     <style>
         /* Cor de fundo principal e fontes */
@@ -142,10 +142,10 @@ if arquivo_enviado is not None:
                     
                     conteudo_final_nota = None
                     # Mecanismo de retentativas inteligentes em caso de erro do servidor
-                    for tentativa in range(3):
+                    for tentativa in range(4):
                         try:
                             response = client.models.generate_content(
-                                model='gemini-3.8-flash',
+                                model='gemini-2.5-flash', # Mudado para a versão estável de produção global
                                 contents=f"Processe e alinhe este fragmento isolado de nota conforme as regras:\n\n{nota_bruta}",
                                 config=types.GenerateContentConfig(
                                     system_instruction=FONTE_CONHECIMENTO,
@@ -155,16 +155,16 @@ if arquivo_enviado is not None:
                             conteudo_final_nota = response.text.strip()
                             break # Se funcionou, sai do loop de tentativas
                         except Exception as e:
-                            # Se estourou cota ou indisponibilidade, espera mais tempo antes de re-tentar
-                            if tentativa < 2:
-                                time.sleep(6)
+                            if tentativa < 3:
+                                # Aumenta o tempo de descanso progressivamente se o servidor falhar
+                                time.sleep(6 + (tentativa * 2))
                             else:
                                 st.error(f"Falha persistente na Nota {idx + 1}: {e}")
                     
                     if conteudo_final_nota:
                         # Identifica o número do documento para nomear o arquivo
                         nome_arquivo = f"NOTA_INDIVIDUAL_{idx + 1}.txt"
-                        for linha in nota_bruta.splitlines():
+                        for linha in conteudo_final_nota.splitlines():
                             if linha.startswith("B|"):
                                 campos_b = linha.split("|")
                                 if len(campos_b) >= 7 and campos_b[6].isdigit():
@@ -173,22 +173,24 @@ if arquivo_enviado is not None:
                         
                         zip_file.writestr(nome_arquivo, conteudo_final_nota)
                     
-                    # Atualiza o progresso e aplica pausa de segurança de 5 segundos (evita erro 429)
+                    # Atualiza o progresso e aplica pausa de segurança entre requisições
                     progresso.progress((idx + 1) / len(notas_extraidas))
                     if idx < len(notas_extraidas) - 1:
-                        time.sleep(5)
+                        time.sleep(4)
                 
                 status_text.empty()
             
-            st.markdown("""
-            <div style='background-color: #E8F5E9; padding: 15px; border-radius: 8px; border-left: 5px solid #2E7D32; color: #1B5E20; margin-top: 15px; margin-bottom: 25px;'>
-                ✅ <b>Sucesso Absoluto!</b> Todas as notas fiscais foram divididas, auditadas e convertidas em rascunhos funcionais.
-            </div>
-            """, unsafe_allow_html=True)
-            
-            st.download_button(
-                label="📦 Baixar Lote Desmembrado (.ZIP)",
-                data=zip_buffer.getvalue(),
-                file_name="LOTES_NF_E_IOB_CORRIGIDOS.zip",
-                mime="application/zip"
-            )
+            # Garante que só mostre sucesso se houver arquivos gerados com sucesso
+            if zip_file.namelist():
+                st.markdown("""
+                <div style='background-color: #E8F5E9; padding: 15px; border-radius: 8px; border-left: 5px solid #2E7D32; color: #1B5E20; margin-top: 15px; margin-bottom: 25px;'>
+                    ✅ <b>Sucesso Absoluto!</b> Todas as notas fiscais foram divididas, auditadas e convertidas em rascunhos funcionais.
+                </div>
+                """, unsafe_allow_html=True)
+                
+                st.download_button(
+                    label="📦 Baixar Lote Desmembrado (.ZIP)",
+                    data=zip_buffer.getvalue(),
+                    file_name="LOTES_NF_E_IOB_CORRIGIDOS.zip",
+                    mime="application/zip"
+                )
