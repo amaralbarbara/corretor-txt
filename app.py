@@ -6,7 +6,7 @@ from google import genai
 from google.genai import types
 
 # 🎨 CONFIGURAÇÃO DA INTERFACE WEB (Estilo IOB Premium)
-st.set_page_config(page_title="Desmembrador Lote TXT - IOB", page_icon="", layout="centered")
+st.set_page_config(page_title="Corretor TXT - IOB", page_icon="", layout="centered")
 
 # Injeção de CSS Customizado para transformar os elementos visuais nos tons de roxo da IOB
 st.markdown("""
@@ -56,7 +56,7 @@ st.markdown("""
 
 # Topo da Página com Identidade Visual
 st.markdown("<div style='text-align: center; margin-bottom: 25px;'>", unsafe_allow_html=True)
-st.title("💜 Desmembrador Inteligente de Lotes TXT")
+st.title("Corretor de TXT")
 st.markdown("""
 <div style='text-align: center; color: #6A1B9A; font-size: 15px; margin-top: -10px; margin-bottom: 25px;'>
     Análise, separação estrutural e alinhamento de campos de notas fiscais padrão <b>NF-e v4.00</b>.
